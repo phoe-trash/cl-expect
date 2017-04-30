@@ -77,7 +77,6 @@
 				  (subseq retval 0 1000)
 				  retval))
 		      (setf notified t)))))
-;	 )
      (finish-output nil)
      (setf final-char (read-char-no-hang stream nil 'eof))
      (values
