@@ -8,8 +8,8 @@
 (defsystem cl-expect
   :name "cl-expect"
   :version "0.0.1"
-  :maintainer "Gábor Poczkodi"
-  :author "Gábor Poczkodi"
+  :maintainer "hajovonta"
+  :author "hajovonta"
   :licence "MIT"
   :description "Library that allows interfacing with OS programs"
   :long-description "Allows to create, read and write program streams. Requires SBCL."
