@@ -58,6 +58,7 @@
 	(progn
 	  (loop for c = (read-char-no-hang stream nil 'eof)
 	     until (or (eq 'eof c)
+		       ;;(null c)
 		       ;; (null expect)
 		       (some #'(lambda (x)
 				 (eq t x))
@@ -158,3 +159,23 @@
   (s/read stream :format-output verbose :expect expect))
 (defun s/write/verbose (stream txt)
   (s/write stream txt :format-output t))
+
+;; (defun |#-reader| (stream sub-char numarg)
+;;   (declare (ignore sub-char numarg))
+;;   (queue-add (read stream t t t)))
+
+;; (set-dispatch-macro-character #\# #\ #'|#-reader|)
+
+(defun open-stream (program &optional args)
+  (let ((stream (create-stream program args)))
+    (tagbody
+     entry
+       (s/read stream)
+       (when (eq 'eof (peek-char nil stream nil 'eof))
+	 (go exit))
+       (let ((input (read-line )))
+	 (format t "~&input: ~s" input)
+	 (finish-output nil)
+	 (s/write stream input :format-output t))
+       (go entry)
+     exit)))
