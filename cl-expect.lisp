@@ -37,7 +37,14 @@
 	      :initial-contents s
 	      :element-type (array-element-type s)))
 
-(defun s/read (stream &key (format-output t) (expect nil) (timeout-in-seconds 120))
+(defun s/read (stream &key
+			(format-output t)
+			(expect nil)
+			(timeout-in-seconds 120)
+			(progress-characters 10000)
+			(progress-summary 1000000)
+			(waiting-characters 1000)
+			(break-characters nil))
   "format-output: t/nil/:quiet
    format-output controls what to display during execution, t: everything, :quiet: nothing, nil: nothing but progress
    expect: nil/list
@@ -90,24 +97,30 @@
 			 (format t "~a" c)
 			 (progn
 			   (when (and
-				  (= 0 (mod char-count 10000))
+				  (= 0 (mod char-count progress-characters))
 				  (not (eq :quiet format-output)))
 			     (format t ".")
-			     (when (= 0 (mod char-count 1000000))
+			     (when (= 0 (mod char-count progress-summary))
 			       (format t "~%characters streamed so far: ~a~%" (write-to-string char-count)))))))
-		   (when (and
-			  (not notified)
-			  (> (- (get-universal-time)
-				last-data-time)
-			     timeout-in-seconds))
-		     (format t "~%*** Waiting for input for more than ~a seconds, last 1000 characters: ***~%~a~%*** End of data ***~%"
-			     timeout-in-seconds
-			     (if (> (length retval)
-				    1000)
-				 (subseq retval (- (length retval)
-						   1000))
-				 retval))
-		     (setf notified t))))))
+		   (progn
+		     (when break-characters
+		       (decf break-characters)
+		       (when (= 0 break-characters)
+			 (format t "~&DEBUG Breaking loop...~%")
+			 (return)))
+		     (when (and
+			    (not notified)
+			    (> (- (get-universal-time)
+				  last-data-time)
+			       timeout-in-seconds))
+		       (format t "~%*** Waiting for input for more than ~a seconds, last 1000 characters: ***~%~a~%*** End of data ***~%"
+			       timeout-in-seconds
+			       (if (> (length retval)
+				      waiting-characters)
+				   (subseq retval (- (length retval)
+						     waiting-characters))
+				   retval))
+		       (setf notified t)))))))
     (finish-output nil)
     (values
      retval
@@ -166,16 +179,91 @@
 
 ;; (set-dispatch-macro-character #\# #\ #'|#-reader|)
 
+(defun s/read/thread (stream output)
+  (setf (symbol-value output) (make-adjustable-string ""))
+  (loop while (not (peek-char nil stream nil 'eof))) 
+  (loop for c = (read-char-no-hang stream nil 'eof)
+     until (eq 'eof c)
+     do
+       (when c
+	 (format t "~a" c)
+	 (vector-push-extend c (symbol-value output)))
+       (sb-thread:thread-yield)))
+
+(defun s/write/thread (stream input &key (interactive nil))
+  (handler-case
+      (progn
+	(if interactive
+	    (loop
+	       while (open-stream-p stream)
+	       for w = (read-line)       
+	       do
+		 (s/write stream w))
+	    ;; not interactive
+	    (loop
+	       while (open-stream-p stream)
+	       do
+		 (when (> (length (symbol-value input)) 0)
+		   (s/write stream (symbol-value input))
+		   (setf (symbol-value input) ""))
+		 (sb-thread:thread-yield))))
+    (error (e) (format t "~a~%" e))))
+
 (defun open-stream (program &optional args)
-  (let ((stream (create-stream program args)))
-    (tagbody
-     entry
-       (s/read stream)
-       (when (eq 'eof (peek-char nil stream nil 'eof))
-	 (go exit))
-       (let ((input (read-line )))
-	 (format t "~&input: ~s" input)
-	 (finish-output nil)
-	 (s/write stream input :format-output t))
-       (go entry)
-     exit)))
+  (let* ((stream (create-stream program args))
+	 (read-var (gensym))
+	 (write-var (gensym)))
+    (setf (symbol-value read-var) (make-adjustable-string ""))
+    (setf (symbol-value write-var) "")
+    (let ((read-thread (sb-thread:make-thread
+			(lambda (standard-output)
+			  (let ((*standard-output* standard-output))
+			    (s/read/thread stream read-var)))
+			:arguments (list *standard-output*)))
+	  (write-thread (sb-thread:make-thread
+			 (lambda (standard-output)
+			   (let ((*standard-output* standard-output))
+			     (s/write/thread stream write-var :interactive nil)))
+			 :arguments (list *standard-output*))))
+      (values read-var write-var stream read-thread write-thread))))
+
+(defun open-interactive (program &optional args)
+  (let* ((stream (create-stream program args))
+	 (read-var (gensym))
+	 (write-var (gensym))
+	 (read-thread (sb-thread:make-thread
+		       (lambda (standard-output)
+			 (let ((*standard-output* standard-output))
+			   (s/read/thread stream read-var)))
+		       :arguments (list *standard-output*)))
+	 (write-thread (sb-thread:make-thread
+			(lambda (standard-input)
+			  (let ((*standard-input* standard-input))
+			    (s/write/thread stream write-var :interactive t)))
+			:arguments *standard-input*)))
+    (values read-var write-var stream read-thread write-thread)))
+
+(defun reset-output (var)
+  (setf (symbol-value var) (make-adjustable-string "")))
+
+(defun expect (var txt)
+  (reset-output var)
+  (loop until (cl-ppcre:scan txt (symbol-value var))
+     do (sb-thread:thread-yield)))
+
+(defun send (var txt)
+  (setf (symbol-value var) txt))
+
+(defun director ()
+  (declare (optimize (debug 3)))
+  (multiple-value-bind (rv wv stream rt wt)
+      (open-stream "ssh" '("hajovonta@hajovonta.com"))
+    (declare (ignorable stream))
+    (expect rv "password:")
+    (send wv "your password here")
+    (expect rv "\\$")
+    (send wv "uptime")
+    (expect rv "\\$")
+    (send wv "exit")
+    (sb-thread:terminate-thread rt)
+    (sb-thread:terminate-thread wt)))
