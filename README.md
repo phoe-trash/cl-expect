@@ -38,5 +38,8 @@ Also, you can give multiple expect strings and check the realized value like thi
       (cond ((string= expect "expect-string-1") (format t "expect-1 was received"))
              (string= expect "expect-string-2") (format t "expect-2 was received"))
              (equal expect 'eof) (format t "unexpected termination"))))
+             
+After tweaking (and using) it for a while, I decided to create two threads for the stream, and gensymed variables that can be used to read and write the input and output of the programs. In addition, there is now a "director" macro that binds the necessary symbols, and simplifies the communication process, thus stripping most of the bloat from the scripts.
+An example is on the way...
 
 Happy hacking!
