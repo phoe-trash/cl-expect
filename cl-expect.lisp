@@ -179,14 +179,15 @@
 
 ;; (set-dispatch-macro-character #\# #\ #'|#-reader|)
 
-(defun s/read/thread (stream output)
+(defun s/read/thread (stream output &key (interactive nil))
   (setf (symbol-value output) (make-adjustable-string ""))
   (loop while (not (peek-char nil stream nil 'eof))) 
   (loop for c = (read-char-no-hang stream nil 'eof)
      until (eq 'eof c)
      do
        (when c
-	 (format t "~a" c)
+	 (when interactive
+	   (format t "~a" c))
 	 (vector-push-extend c (symbol-value output)))
        (sb-thread:thread-yield)))
 
@@ -218,7 +219,7 @@
     (let ((read-thread (sb-thread:make-thread
 			(lambda (standard-output)
 			  (let ((*standard-output* standard-output))
-			    (s/read/thread stream read-var)))
+			    (s/read/thread stream read-var :interactive nil)))
 			:arguments (list *standard-output*)))
 	  (write-thread (sb-thread:make-thread
 			 (lambda (standard-output)
@@ -234,7 +235,7 @@
 	 (read-thread (sb-thread:make-thread
 		       (lambda (standard-output)
 			 (let ((*standard-output* standard-output))
-			   (s/read/thread stream read-var)))
+			   (s/read/thread stream read-var :interactive t)))
 		       :arguments (list *standard-output*)))
 	 (write-thread (sb-thread:make-thread
 			(lambda (standard-input)
@@ -248,22 +249,31 @@
 
 (defun expect (var txt)
   (reset-output var)
-  (loop until (cl-ppcre:scan txt (symbol-value var))
-     do (sb-thread:thread-yield)))
+  (let* ((txt (if (listp txt)
+		  txt
+		  (list txt)))
+	 (match# nil))
+    (loop
+       for m = (setf match# (loop for s in txt thereis (cl-ppcre:scan s (symbol-value var))))
+       until m
+       do
+	 (sb-thread:thread-yield))
+    (values
+     (symbol-value var)
+     match#)))
 
 (defun send (var txt)
   (setf (symbol-value var) txt))
 
-(defun director ()
-  (declare (optimize (debug 3)))
-  (multiple-value-bind (rv wv stream rt wt)
-      (open-stream "ssh" '("hajovonta@hajovonta.com"))
-    (declare (ignorable stream))
-    (expect rv "password:")
-    (send wv "your password here")
-    (expect rv "\\$")
-    (send wv "uptime")
-    (expect rv "\\$")
-    (send wv "exit")
-    (sb-thread:terminate-thread rt)
-    (sb-thread:terminate-thread wt)))
+(defmacro director (program &optional args script)
+  `(multiple-value-bind (rv wv stream rt wt)
+       (open-stream ,program ,args)
+     (declare (ignorable stream))
+     (flet ((expect (txt)
+	      (expect rv txt))
+	    (send (txt)
+	      (send wv txt)))
+       ,@script)
+     (sb-thread:terminate-thread rt)
+     (sb-thread:terminate-thread wt)))
+
