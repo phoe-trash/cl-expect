@@ -6,5 +6,10 @@
   (:export :create-stream
 	   :s/read
 	   :s/write
-	   :s/execute))
+	   :s/execute
+	   :open-interactive
+	   :open-stream
+	   :expect
+	   :send
+	   :director))
 
