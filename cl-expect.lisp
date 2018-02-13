@@ -148,6 +148,9 @@
   (program-stream "unbuffer" (append (list "-p" program)
 				     args)))
 
+;; (defun create-stream (program &optional args)
+;;   (program-stream program args))
+
 (defmacro with-program-stream (stream-name command args
 			       &body body)
   `(let ((,stream-name (create-stream ,command ,args)))
@@ -277,3 +280,5 @@
      (sb-thread:terminate-thread rt)
      (sb-thread:terminate-thread wt)))
 
+;; example code:
+;; (director "uptime" nil ((format t "~a" (expect "\\n"))))
