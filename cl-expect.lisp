@@ -6,16 +6,17 @@
 
 ;; use this to run programs. Returns a stream which can be used to manipulate the program.
 (defun program-stream (program &optional args)
-  (let ((process (sb-ext:run-program program args
-				     :input :stream
-				     :output :stream
-				     :wait nil
-				     :search t)))
+  (let ((process (uiop:launch-program (cons program args)
+                                      :input :stream
+                                      :output :stream)))
     (when process
-      (values
-       (make-two-way-stream (sb-ext:process-output process)
-			    (sb-ext:process-input process))
-       process))))
+      (let* ((output-stream (uiop:process-info-output process))
+             (stream (if (typep output-stream 'two-way-stream)
+                         output-stream
+                         (make-two-way-stream
+                          (uiop:process-info-output process)
+                          (uiop:process-info-input process)))))
+        (values stream process)))))
 
 ;; collect all output and optionally print it to the screen.
 (defun read-all (stream &key format-output)
@@ -23,28 +24,28 @@
     (loop for line = (read-line stream nil 'eof)
        until (eq line 'eof)
        do
-	 (setf retval (append retval (list line)))
-	 (when format-output
-	   (format t "~d~%" line)
-	   (force-output nil)))
+   (setf retval (append retval (list line)))
+   (when format-output
+     (format t "~d~%" line)
+     (force-output nil)))
     retval))
 
 ;; following is from Rainer Joswig: http://stackoverflow.com/questions/18045842/appending-character-to-string-in-common-lisp
 (defun make-adjustable-string (s)
   (make-array (length s)
-	      :fill-pointer (length s)
-	      :adjustable t
-	      :initial-contents s
-	      :element-type (array-element-type s)))
+        :fill-pointer (length s)
+        :adjustable t
+        :initial-contents s
+        :element-type (array-element-type s)))
 
 (defun s/read (stream &key
-			(format-output t)
-			(expect nil)
-			(timeout-in-seconds 120)
-			(progress-characters 10000)
-			(progress-summary 1000000)
-			(waiting-characters 1000)
-			(break-characters nil))
+                        (format-output t)
+                        (expect nil)
+                        (timeout-in-seconds 120)
+                        (progress-characters 10000)
+                        (progress-summary 1000000)
+                        (waiting-characters 1000)
+                        (break-characters nil))
   "format-output: t/nil/:quiet
    format-output controls what to display during execution, t: everything, :quiet: nothing, nil: nothing but progress
    expect: nil/list
@@ -52,89 +53,89 @@
   ;; wait until there is some data to read
   (loop while (not (peek-char nil stream nil 'eof)))
   (let ((retval (make-adjustable-string ""))
-	(last-data-time (get-universal-time))
-	(notified nil)
-	;; (maxlen (if expect
-	;; 	    (apply #'max (loop for e in expect collect (length (car e))))
-	;; 	    nil))
-	(char-count 0))
+        (last-data-time (get-universal-time))
+        (notified nil)
+        ;; (maxlen (if expect
+        ;;      (apply #'max (loop for e in expect collect (length (car e))))
+        ;;      nil))
+        (char-count 0))
     (if (and (listp expect)
-	     ;; (not (null expect))
-	     )
-	;;expect is a non-null list
-	(progn
-	  (loop for c = (read-char-no-hang stream nil 'eof)
-	     until (or (eq 'eof c)
-		       ;;(null c)
-		       ;; (null expect)
-		       (some #'(lambda (x)
-				 (eq t x))
-			     (loop for ex in expect
-				collect
-				  (let ((l-r (length retval))
-					(l-e (length ex)))
-				    (and
-				     (>= l-r l-e)
-				     (equal ex (subseq retval (- (length retval)
-								 (length ex)))))))))
-	     do
-	       (if c
-		   (progn
-		     (incf char-count)
-		     (setf last-data-time (get-universal-time))
-		     (setf notified nil)
-		     (vector-push-extend c retval)
-		     
-		     ;; this has been temporarily disabled
-		     ;; (when (and
-		     ;; 	    discard-result
-		     ;; 	    maxlen)
-		     ;;   (setf retval (last retval maxlen)))
-		     (if (and
-			  format-output
-			  (not (eq :quiet format-output))
-			  (not (eq c #\Backspace)))
-			 (format t "~a" c)
-			 (progn
-			   (when (and
-				  (= 0 (mod char-count progress-characters))
-				  (not (eq :quiet format-output)))
-			     (format t ".")
-			     (when (= 0 (mod char-count progress-summary))
-			       (format t "~%characters streamed so far: ~a~%" (write-to-string char-count)))))))
-		   (progn
-		     (when break-characters
-		       (decf break-characters)
-		       (when (= 0 break-characters)
-			 (format t "~&DEBUG Breaking loop...~%")
-			 (return)))
-		     (when (and
-			    (not notified)
-			    (> (- (get-universal-time)
-				  last-data-time)
-			       timeout-in-seconds))
-		       (format t "~%*** Waiting for input for more than ~a seconds, last 1000 characters: ***~%~a~%*** End of data ***~%"
-			       timeout-in-seconds
-			       (if (> (length retval)
-				      waiting-characters)
-				   (subseq retval (- (length retval)
-						     waiting-characters))
-				   retval))
-		       (setf notified t)))))))
+             ;; (not (null expect))
+             )
+        ;;expect is a non-null list
+        (progn
+          (loop for c = (read-char-no-hang stream nil 'eof)
+                until (or (eq 'eof c)
+                          ;;(null c)
+                          ;; (null expect)
+                          (some #'(lambda (x)
+                                    (eq t x))
+                                (loop for ex in expect
+                                      collect
+                                      (let ((l-r (length retval))
+                                            (l-e (length ex)))
+                                        (and
+                                         (>= l-r l-e)
+                                         (equal ex (subseq retval (- (length retval)
+                                                                     (length ex)))))))))
+                do
+                   (if c
+                       (progn
+                         (incf char-count)
+                         (setf last-data-time (get-universal-time))
+                         (setf notified nil)
+                         (vector-push-extend c retval)
+
+                         ;; this has been temporarily disabled
+                         ;; (when (and
+                         ;;       discard-result
+                         ;;       maxlen)
+                         ;;   (setf retval (last retval maxlen)))
+                         (if (and
+                              format-output
+                              (not (eq :quiet format-output))
+                              (not (eq c #\Backspace)))
+                             (format t "~a" c)
+                             (progn
+                               (when (and
+                                      (= 0 (mod char-count progress-characters))
+                                      (not (eq :quiet format-output)))
+                                 (format t ".")
+                                 (when (= 0 (mod char-count progress-summary))
+                                   (format t "~%characters streamed so far: ~a~%" (write-to-string char-count)))))))
+                       (progn
+                         (when break-characters
+                           (decf break-characters)
+                           (when (= 0 break-characters)
+                             (format t "~&DEBUG Breaking loop...~%")
+                             (return)))
+                         (when (and
+                                (not notified)
+                                (> (- (get-universal-time)
+                                      last-data-time)
+                                   timeout-in-seconds))
+                           (format t "~%*** Waiting for input for more than ~a seconds, last 1000 characters: ***~%~a~%*** End of data ***~%"
+                                   timeout-in-seconds
+                                   (if (> (length retval)
+                                          waiting-characters)
+                                       (subseq retval (- (length retval)
+                                                         waiting-characters))
+                                       retval))
+                           (setf notified t)))))))
     (finish-output nil)
     (values
      retval
      ;; (coerce retval 'string)
      (let ((match nil))
        (loop for ex in expect do
-	    (when
-		(let ((l-r (length retval))
-		      (l-e (length ex)))
-		  (when (and
-			 (>= l-r l-e))
-		    (equal ex (subseq retval (- (length retval)
-						(length ex))))))
-	      (setf match ex)))
+         (when
+             (let ((l-r (length retval))
+                   (l-e (length ex)))
+               (when (and
+                      (>= l-r l-e))
+                 (equal ex (subseq retval (- (length retval)
+                                             (length ex))))))
+           (setf match ex)))
        match))))
 
 (defun s/write (stream txt &key (format-output nil))
@@ -146,13 +147,13 @@
 
 (defun create-stream (program &optional args)
   (program-stream "unbuffer" (append (list "-p" program)
-				     args)))
+             args)))
 
 ;; (defun create-stream (program &optional args)
 ;;   (program-stream program args))
 
 (defmacro with-program-stream (stream-name command args
-			       &body body)
+                               &body body)
   `(let ((,stream-name (create-stream ,command ,args)))
      ,@body))
 
@@ -184,67 +185,67 @@
 
 (defun s/read/thread (stream output &key (interactive nil))
   (setf (symbol-value output) (make-adjustable-string ""))
-  (loop while (not (peek-char nil stream nil 'eof))) 
+  (loop while (not (peek-char nil stream nil 'eof)))
   (loop for c = (read-char-no-hang stream nil 'eof)
-     until (eq 'eof c)
-     do
-       (when c
-	 (when interactive
-	   (format t "~a" c))
-	 (vector-push-extend c (symbol-value output)))
-       (sb-thread:thread-yield)))
+        until (eq 'eof c)
+        do
+           (when c
+             (when interactive
+               (format t "~a" c))
+             (vector-push-extend c (symbol-value output)))
+           (bt:thread-yield)))
 
 (defun s/write/thread (stream input &key (interactive nil))
   (handler-case
       (progn
-	(if interactive
-	    (loop
-	       while (open-stream-p stream)
-	       for w = (read-line)       
-	       do
-		 (s/write stream w))
-	    ;; not interactive
-	    (loop
-	       while (open-stream-p stream)
-	       do
-		 (when (> (length (symbol-value input)) 0)
-		   (s/write stream (symbol-value input))
-		   (setf (symbol-value input) ""))
-		 (sb-thread:thread-yield))))
+        (if interactive
+            (loop
+              while (open-stream-p stream)
+              for w = (read-line)
+              do
+                 (s/write stream w))
+            ;; not interactive
+            (loop
+              while (open-stream-p stream)
+              do
+                 (when (> (length (symbol-value input)) 0)
+                   (s/write stream (symbol-value input))
+                   (setf (symbol-value input) ""))
+                 (bt:thread-yield))))
     (error (e) (format t "~a~%" e))))
 
 (defun open-stream (program &optional args)
   (let* ((stream (create-stream program args))
-	 (read-var (gensym))
-	 (write-var (gensym)))
+         (read-var (gensym))
+         (write-var (gensym)))
     (setf (symbol-value read-var) (make-adjustable-string ""))
     (setf (symbol-value write-var) "")
-    (let ((read-thread (sb-thread:make-thread
-			(lambda (standard-output)
-			  (let ((*standard-output* standard-output))
-			    (s/read/thread stream read-var :interactive nil)))
-			:arguments (list *standard-output*)))
-	  (write-thread (sb-thread:make-thread
-			 (lambda (standard-output)
-			   (let ((*standard-output* standard-output))
-			     (s/write/thread stream write-var :interactive nil)))
-			 :arguments (list *standard-output*))))
+    (let ((read-thread (bt:make-thread
+                        (lambda (standard-output)
+                          (let ((*standard-output* standard-output))
+                            (s/read/thread stream read-var :interactive nil)))
+                        :arguments (list *standard-output*)))
+          (write-thread (bt:make-thread
+                         (lambda (standard-output)
+                           (let ((*standard-output* standard-output))
+                             (s/write/thread stream write-var :interactive nil)))
+                         :arguments (list *standard-output*))))
       (values read-var write-var stream read-thread write-thread))))
 
 (defun open-interactive (program &optional args)
   (let* ((stream (create-stream program args))
-	 (read-var (gensym))
-	 (write-var (gensym))
-	 (read-thread (sb-thread:make-thread
-		       (lambda (standard-output)
-			 (let ((*standard-output* standard-output))
-			   (s/read/thread stream read-var :interactive t)))
-		       :arguments (list *standard-output*)))
-	 (write-thread (sb-thread:make-thread
-			(lambda (standard-input)
-			  (let ((*standard-input* standard-input))
-			    (s/write/thread stream write-var :interactive t)))
-			:arguments *standard-input*)))
+         (read-var (gensym))
+         (write-var (gensym))
+         (read-thread (bt:make-thread
+                       (lambda (standard-output)
+                         (let ((*standard-output* standard-output))
+                           (s/read/thread stream read-var :interactive t)))
+                       :arguments (list *standard-output*)))
+         (write-thread (bt:make-thread
+                        (lambda (standard-input)
+                          (let ((*standard-input* standard-input))
+                            (s/write/thread stream write-var :interactive t)))
+                        :arguments *standard-input*)))
     (values read-var write-var stream read-thread write-thread)))
 
 (defun reset-output (var)
@@ -252,15 +253,12 @@
 
 (defun expect (var txt)
   (reset-output var)
-  (let* ((txt (if (listp txt)
-		  txt
-		  (list txt)))
-	 (match# nil))
+  (let* ((txt (alexandria:ensure-list txt))
+         (match# nil))
     (loop
-       for m = (setf match# (loop for s in txt thereis (cl-ppcre:scan s (symbol-value var))))
-       until m
-       do
-	 (sb-thread:thread-yield))
+      for m = (setf match# (loop for s in txt thereis (cl-ppcre:scan s (symbol-value var))))
+      until m
+      do (bt:thread-yield))
     (values
      (symbol-value var)
      match#)))
@@ -273,12 +271,12 @@
        (open-stream ,program ,args)
      (declare (ignorable stream))
      (flet ((expect (txt)
-	      (expect rv txt))
-	    (send (txt)
-	      (send wv txt)))
+              (expect rv txt))
+            (send (txt)
+              (send wv txt)))
        ,@script)
-     (sb-thread:terminate-thread rt)
-     (sb-thread:terminate-thread wt)))
+     (bt:destroy-thread rt)
+     (bt:destroy-thread wt)))
 
 ;; example code:
 ;; (director "uptime" nil ((format t "~a" (expect "\\n"))))
